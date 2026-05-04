@@ -1,0 +1,19 @@
+# Source clips and intermediate renders — keep the demo .webp only.
+dance_src.*
+dance_720p.*
+dance_rgba.*
+samples/
+*.mp4
+*.webm
+*.apng
+sample_*.png
+over_*.png
+alpha_*.png
+webp_check.png
+rvm_single_frame.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
