@@ -130,7 +130,8 @@ The build also works on Linux (`./dist/desktop-dancer` ELF binary) and macOS (`.
 - `rvm_to_webp.py` — RVM matting pipeline, outputs animated WebP with alpha
 - `desktop_dancer.spec` — PyInstaller build spec
 - `.github/workflows/build-windows.yml` — CI builds and attaches exe on `v*` tags
-- `dance_loop.webp` — 15s demo, ILLIT "Magnetic" choreography (Studio CHOOM)
+- `dance_loop.webp` — 15s demo, ILLIT "Magnetic" (Studio CHOOM) — bundled into the exe
+- `new_loop.webp` — 15s demo, second clip (Studio CHOOM) — try it via `python desktop_dancer.py new_loop.webp`
 
 ## Platform notes
 
