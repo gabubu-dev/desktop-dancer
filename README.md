@@ -8,7 +8,7 @@ Three modes:
 
 - **Dancer** — small floating loop on your desktop with a tray-icon controller.
 - **Lunch** — fullscreen "I'M ON LUNCH" away screen with the dancer in the middle. Triggered from the tray menu or `--lunch "<message>"`.
-- **Screensaver (Windows)** — install `desktop-dancer.scr` and the OS launches the same "I'M ON LUNCH" overlay with Sakura after your idle timeout. Exits on any mouse motion / click / key.
+- **Screensaver (Windows)** — install `desktop-dancer.scr` and the OS launches the same "I'M ON LUNCH" overlay with Sakura and a 1-hour countdown after your idle timeout. Exits on any mouse motion / click / key.
 
 ![demo](dance_loop.webp)
 
@@ -38,13 +38,13 @@ python desktop_dancer.py
 
 ## Bundled clips
 
-Pick one with `--clip <name>` (no argument = `kpop`):
+Pick one with `--clip <name>` (no argument = `sakura`):
 
 | Name     | Source                                      | File                  |
 |----------|---------------------------------------------|-----------------------|
+| `sakura` | Cardcaptor Sakura OP1 "Catch You Catch Me"  | `sakura_loop.webp`    |
 | `kpop`   | ILLIT "Magnetic" (Studio CHOOM)             | `dance_loop.webp`     |
 | `kpop2`  | Second Studio CHOOM clip                    | `new_loop.webp`       |
-| `sakura` | Cardcaptor Sakura OP1 "Catch You Catch Me"  | `sakura_loop.webp`    |
 
 You can also pass a path: `desktop-dancer my_anim.webp`.
 
@@ -80,17 +80,19 @@ A fullscreen "I'M ON LUNCH" away screen for when you step away from your desk. B
 
 Two ways to launch it:
 
-**From the tray icon (recommended on Windows).** Right-click the dancer tray icon → **Go on lunch…**. You'll get a prompt for the message ("back at 1pm", "lunch — back in 30 min", etc.). Esc returns you to the small floating dancer.
+**From the tray icon (recommended on Windows).** Right-click the dancer tray icon → **Go on lunch…**. You'll get a prompt for an optional message; either way you get a 1-hour countdown timer. Esc returns you to the small floating dancer.
 
 **From the command line.**
 
 ```bash
-desktop-dancer --lunch "back at 1pm"
-desktop-dancer --lunch "lunch — back ~1pm" --clip sakura
-desktop-dancer --lunch "brb" --title "AFK"
+desktop-dancer --lunch                       # just a 1h countdown
+desktop-dancer --lunch --timer 1h            # same, explicit
+desktop-dancer --lunch "back at 1pm"         # static message, no timer
+desktop-dancer --lunch "lunch" --timer 30m   # message + 30-minute timer
+desktop-dancer --lunch "brb" --title "AFK"   # swap the big header
 ```
 
-`--title` swaps the big header (default: `I'M ON LUNCH`).
+`--timer` accepts `1h`, `30m`, `1h30m`, `90s`, or a raw integer of seconds. `--title` swaps the big header (default: `I'M ON LUNCH`).
 
 ### Windows: make a desktop shortcut for lunch mode
 
@@ -101,7 +103,7 @@ desktop-dancer --lunch "brb" --title "AFK"
 
 ## Use it as your Windows screensaver
 
-Every tagged release ships a `desktop-dancer.scr` next to the `.exe` — same binary, handles the `/s` `/c` `/p:` args Windows passes to screensavers. In `/s` mode it shows the fullscreen "I'M ON LUNCH" overlay with the Sakura clip and exits on any mouse motion, click, or keypress.
+Every tagged release ships a `desktop-dancer.scr` next to the `.exe` — same binary, handles the `/s` `/c` `/p:` args Windows passes to screensavers. In `/s` mode it shows the fullscreen "I'M ON LUNCH" overlay with the Sakura clip and a 1-hour countdown timer, and exits on any mouse motion, click, or keypress.
 
 ### Install (no admin needed)
 

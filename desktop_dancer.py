@@ -33,10 +33,11 @@ Lunch overlay:
     Esc            — dismiss
 """
 import argparse
+import re
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QSize, QPoint, QTimer, QTime
+from PyQt6.QtCore import Qt, QSize, QPoint, QTimer, QTime, QDateTime
 from PyQt6.QtGui import (
     QMovie, QIcon, QPixmap, QPainter, QAction, QFont, QImageReader, QCursor,
 )
@@ -52,6 +53,7 @@ CLIP_MAP = {
     "kpop2":  "new_loop.webp",
     "sakura": "sakura_loop.webp",
 }
+DEFAULT_CLIP = "sakura"
 
 
 def resource_path(rel: str) -> Path:
@@ -61,12 +63,35 @@ def resource_path(rel: str) -> Path:
 
 
 def resolve_clip(name: str | None, explicit_path: str | None) -> Path:
+    """Pick a clip path. Falls back to kpop if the preferred clip isn't bundled."""
     if explicit_path:
         return Path(explicit_path).expanduser().resolve()
-    rel = CLIP_MAP.get(name or "kpop")
+    rel = CLIP_MAP.get(name or DEFAULT_CLIP)
     if rel is None:
         sys.exit(f"Unknown --clip {name!r}; choose from {sorted(CLIP_MAP)}")
-    return resource_path(rel)
+    path = resource_path(rel)
+    if not path.exists() and name is None:
+        # Sakura is the default but might not be bundled in a custom build —
+        # fall back to the always-present kpop loop rather than crashing.
+        path = resource_path(CLIP_MAP["kpop"])
+    return path
+
+
+_DURATION_RE = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$")
+
+
+def parse_duration(text: str) -> int:
+    """Parse '1h', '30m', '1h30m', '90s', or a raw integer to seconds."""
+    s = text.strip().lower()
+    if s.isdigit():
+        return int(s)
+    m = _DURATION_RE.match(s)
+    if not m or not any(m.groups()):
+        raise argparse.ArgumentTypeError(
+            f"can't parse duration {text!r}; try '1h', '30m', '1h30m', or '90s'"
+        )
+    h, mn, sec = (int(g) if g else 0 for g in m.groups())
+    return h * 3600 + mn * 60 + sec
 
 
 def load_movie(path: Path) -> QMovie:
@@ -181,6 +206,7 @@ class LunchOverlay(QWidget):
     def __init__(
         self, clip_path: Path, title: str, message: str,
         on_dismiss=None, screensaver: bool = False,
+        timer_seconds: int | None = None,
     ):
         super().__init__(
             None,
@@ -202,11 +228,26 @@ class LunchOverlay(QWidget):
         self.title_label.setStyleSheet("color: white; letter-spacing: 8px;")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Message.
+        # Static message (e.g. "back at 1pm"). Hidden when empty.
         self.msg_label = QLabel(message)
         self.msg_label.setFont(QFont("Segoe UI", 36))
         self.msg_label.setStyleSheet("color: #d0d0d8;")
         self.msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if not message:
+            self.msg_label.hide()
+
+        # Countdown timer, big and friendly so it reads from across the room.
+        self._timer_end: QDateTime | None = None
+        if timer_seconds:
+            self._timer_end = QDateTime.currentDateTime().addSecs(timer_seconds)
+        self.timer_label = QLabel("")
+        self.timer_label.setFont(QFont("Segoe UI", 56, QFont.Weight.Bold))
+        self.timer_label.setStyleSheet("color: #e0a8ff;")  # soft purple
+        self.timer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if self._timer_end is None:
+            self.timer_label.hide()
+        else:
+            self._tick_timer()
 
         # Live clock, just because.
         self.clock = QLabel("")
@@ -215,7 +256,7 @@ class LunchOverlay(QWidget):
         self.clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._tick_clock()
         self._clock_timer = QTimer(self)
-        self._clock_timer.timeout.connect(self._tick_clock)
+        self._clock_timer.timeout.connect(self._tick)
         self._clock_timer.start(1000)
 
         # Dancer loop.
@@ -239,6 +280,7 @@ class LunchOverlay(QWidget):
         layout.addStretch(1)
         layout.addWidget(self.title_label)
         layout.addWidget(self.msg_label)
+        layout.addWidget(self.timer_label)
         layout.addWidget(self.clock)
         layout.addSpacing(20)
         layout.addWidget(self.dancer_label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -247,6 +289,23 @@ class LunchOverlay(QWidget):
 
     def _tick_clock(self):
         self.clock.setText(QTime.currentTime().toString("h:mm AP"))
+
+    def _tick_timer(self):
+        if self._timer_end is None:
+            return
+        remaining = max(0, QDateTime.currentDateTime().secsTo(self._timer_end))
+        if remaining <= 0:
+            self.timer_label.setText("back any minute now")
+            return
+        h, r = divmod(remaining, 3600)
+        m, s = divmod(r, 60)
+        self.timer_label.setText(
+            f"back in {h}:{m:02d}:{s:02d}" if h else f"back in {m:02d}:{s:02d}"
+        )
+
+    def _tick(self):
+        self._tick_clock()
+        self._tick_timer()
 
     def _dismiss(self):
         self.close()
@@ -348,8 +407,8 @@ class TrayController:
             return
         text, ok = QInputDialog.getText(
             None, "Go on lunch",
-            "Message to show on the away screen:",
-            text="back in 30 min",
+            "Optional message (leave blank for just the 1h timer):",
+            text="",
         )
         if not ok:
             return
@@ -357,6 +416,7 @@ class TrayController:
         self._overlay = LunchOverlay(
             self.dancer.clip_path, "I'M ON LUNCH", text,
             on_dismiss=self._exit_lunch_mode,
+            timer_seconds=3600,
         )
         self._overlay.showFullScreen()
 
@@ -396,13 +456,11 @@ def run_screensaver(mode: str) -> int:
     app.setQuitOnLastWindowClosed(True)
 
     if mode == "s":
-        # Prefer sakura; fall back to kpop if for some reason it wasn't bundled.
-        clip = resource_path(CLIP_MAP["sakura"])
-        if not clip.exists():
-            clip = resource_path(CLIP_MAP["kpop"])
+        clip = resolve_clip(None, None)  # sakura by default, kpop fallback
         overlay = LunchOverlay(
-            clip, "I'M ON LUNCH", "back soon",
+            clip, "I'M ON LUNCH", "",
             screensaver=True,
+            timer_seconds=3600,  # 1-hour countdown is the screensaver default
         )
         overlay.showFullScreen()
         return app.exec()
@@ -437,12 +495,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Pick a bundled clip (default: kpop).",
     )
     p.add_argument(
-        "--lunch", metavar="MESSAGE",
-        help="Launch in fullscreen 'on lunch' mode showing this message.",
+        "--lunch", metavar="MESSAGE", nargs="?", const="",
+        help="Launch in fullscreen 'on lunch' mode showing this message. "
+             "Pass alone (e.g. `--lunch`) to show just the timer + clock.",
     )
     p.add_argument(
         "--title", default="I'M ON LUNCH",
         help="Big header text for lunch mode (default: %(default)s).",
+    )
+    p.add_argument(
+        "--timer", type=parse_duration, metavar="DURATION",
+        help="Show a countdown timer (e.g. '1h', '30m', '1h30m', '90s').",
     )
     return p
 
@@ -464,7 +527,9 @@ def main():
         sys.exit(f"Clip not found: {clip}")
 
     if args.lunch is not None:
-        overlay = LunchOverlay(clip, args.title, args.lunch)
+        overlay = LunchOverlay(
+            clip, args.title, args.lunch, timer_seconds=args.timer,
+        )
         overlay.showFullScreen()
         sys.exit(app.exec())
 
