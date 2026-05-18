@@ -1,6 +1,6 @@
 """Frameless transparent always-on-top dancer + fullscreen 'on lunch' mode.
 
-Two modes:
+Three modes:
 
 Normal (default) — a small floating dancer window with a tray icon.
 
@@ -18,6 +18,11 @@ Lunch — fullscreen "I'M ON LUNCH" away screen with the dancer in the middle.
 The tray icon also has a "Go on lunch..." menu entry that pops a prompt for the
 message, so you don't have to relaunch from the command line.
 
+Screensaver — rename/copy the built exe to ``desktop-dancer.scr`` and Windows will
+treat it as a screen saver. The OS passes ``/s`` (fullscreen), ``/c`` (settings),
+or ``/p:HWND`` (preview rectangle); we handle all three. In ``/s`` mode the
+overlay exits on any mouse motion, click, or keypress.
+
 Window controls (when not click-through):
     Drag           — move
     Scroll         — resize
@@ -33,11 +38,11 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, QSize, QPoint, QTimer, QTime
 from PyQt6.QtGui import (
-    QMovie, QIcon, QPixmap, QPainter, QAction, QFont, QImageReader,
+    QMovie, QIcon, QPixmap, QPainter, QAction, QFont, QImageReader, QCursor,
 )
 from PyQt6.QtWidgets import (
     QApplication, QLabel, QWidget, QSystemTrayIcon, QMenu,
-    QVBoxLayout, QInputDialog,
+    QVBoxLayout, QInputDialog, QMessageBox,
 )
 
 
@@ -173,13 +178,23 @@ class LunchOverlay(QWidget):
     process.
     """
 
-    def __init__(self, clip_path: Path, title: str, message: str, on_dismiss=None):
+    def __init__(
+        self, clip_path: Path, title: str, message: str,
+        on_dismiss=None, screensaver: bool = False,
+    ):
         super().__init__(
             None,
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint,
         )
         self.setStyleSheet("background-color: rgb(8, 10, 16);")
         self._on_dismiss = on_dismiss
+        self._screensaver = screensaver
+        self._start_mouse_pos: QPoint | None = None
+        if screensaver:
+            # Standard Windows screensaver behaviour: hide the cursor, exit on
+            # any meaningful mouse motion / click / keypress.
+            self.setMouseTracking(True)
+            self.setCursor(Qt.CursorShape.BlankCursor)
 
         # Title — huge, bold, tracked-out.
         self.title_label = QLabel(title.upper())
@@ -210,8 +225,10 @@ class LunchOverlay(QWidget):
         self.dancer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.movie.start()
 
-        # Hint at the bottom.
-        self.hint = QLabel("press Esc to dismiss")
+        # Hint at the bottom. Screensaver mode keeps it discreet since users
+        # already know any input dismisses a screensaver.
+        hint_text = "move mouse or press any key to exit" if screensaver else "press Esc to dismiss"
+        self.hint = QLabel(hint_text)
         self.hint.setFont(QFont("Segoe UI", 14))
         self.hint.setStyleSheet("color: #555;")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -231,8 +248,19 @@ class LunchOverlay(QWidget):
     def _tick_clock(self):
         self.clock.setText(QTime.currentTime().toString("h:mm AP"))
 
+    def _dismiss(self):
+        self.close()
+        if self._on_dismiss:
+            self._on_dismiss()
+        else:
+            QApplication.quit()
+
     def showEvent(self, e):
         super().showEvent(e)
+        if self._screensaver:
+            # Remember where the mouse was when the screensaver took over, so
+            # we can ignore sub-pixel jitter and only exit on real motion.
+            self._start_mouse_pos = QCursor.pos()
         # Size the dancer at ~40% of the screen height once we know the screen.
         screen = self.screen().availableGeometry() if self.screen() else None
         if screen is None:
@@ -247,13 +275,22 @@ class LunchOverlay(QWidget):
         scale = target_h / size.height()
         self.movie.setScaledSize(QSize(int(size.width() * scale), target_h))
 
+    # Screensaver convention: any key, click, or non-trivial mouse motion ends it.
+    # In lunch mode it stays Esc-only so a stray bump doesn't wipe the away screen.
     def keyPressEvent(self, e):
-        if e.key() == Qt.Key.Key_Escape:
-            self.close()
-            if self._on_dismiss:
-                self._on_dismiss()
-            else:
-                QApplication.quit()
+        if self._screensaver or e.key() == Qt.Key.Key_Escape:
+            self._dismiss()
+
+    def mousePressEvent(self, e):
+        if self._screensaver:
+            self._dismiss()
+
+    def mouseMoveEvent(self, e):
+        if not self._screensaver or self._start_mouse_pos is None:
+            return
+        d = QCursor.pos() - self._start_mouse_pos
+        if abs(d.x()) + abs(d.y()) > 5:  # standard ~5px jitter tolerance
+            self._dismiss()
 
 
 class TrayController:
@@ -328,6 +365,64 @@ class TrayController:
         self.dancer.show()
 
 
+def parse_screensaver_args(argv: list[str]) -> str | None:
+    """Detect the Windows screensaver invocation style.
+
+    Windows runs `.scr` files with one of:
+
+    * ``/s``            — start fullscreen, exit on input
+    * ``/c`` / ``/c:N`` — open the Settings dialog
+    * ``/p:N`` / ``/p N``  — render into preview HWND ``N`` (we don't support this;
+                              we just exit so the Personalization panel doesn't hang)
+
+    Accepts both forward-slash and dash variants for safety. Returns ``'s'``,
+    ``'c'``, ``'p'`` or ``None``.
+    """
+    if len(argv) < 2:
+        return None
+    a = argv[1].lower()
+    if a in ("/s", "-s"):
+        return "s"
+    if a == "/c" or a == "-c" or a.startswith("/c:") or a.startswith("-c:"):
+        return "c"
+    if a.startswith("/p") or a.startswith("-p"):
+        return "p"
+    return None
+
+
+def run_screensaver(mode: str) -> int:
+    """Handle a ``.scr`` invocation. Always returns an exit code."""
+    app = QApplication(sys.argv[:1])
+    app.setQuitOnLastWindowClosed(True)
+
+    if mode == "s":
+        # Prefer sakura; fall back to kpop if for some reason it wasn't bundled.
+        clip = resource_path(CLIP_MAP["sakura"])
+        if not clip.exists():
+            clip = resource_path(CLIP_MAP["kpop"])
+        overlay = LunchOverlay(
+            clip, "I'M ON LUNCH", "back soon",
+            screensaver=True,
+        )
+        overlay.showFullScreen()
+        return app.exec()
+
+    if mode == "c":
+        QMessageBox.information(
+            None, "desktop-dancer screensaver",
+            "Default: Sakura with an 'I'M ON LUNCH' overlay.\n\n"
+            "Move the mouse or press any key to exit while it's running.\n\n"
+            "For a custom message, launch desktop-dancer.exe directly with "
+            "`--lunch \"your message here\"`.",
+        )
+        return 0
+
+    # mode == "p": Personalization preview rectangle. Embedding a Qt window in
+    # an arbitrary HWND is fiddly and not worth blocking the release on. Exit
+    # cleanly so the Personalization panel doesn't hang waiting for us.
+    return 0
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="desktop-dancer",
@@ -353,6 +448,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main():
+    # Windows screensaver invocation (.scr /s, /c, /p:HWND) bypasses argparse
+    # because the args start with `/`, which argparse doesn't recognize.
+    ss = parse_screensaver_args(sys.argv)
+    if ss is not None:
+        sys.exit(run_screensaver(ss))
+
     args = build_arg_parser().parse_args()
 
     app = QApplication(sys.argv[:1])

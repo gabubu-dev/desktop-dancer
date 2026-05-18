@@ -4,10 +4,11 @@ Floating, transparent, always-on-top dancer for your desktop. Feeds a video clip
 
 Cross-platform: Linux (X11 + Wayland via XWayland), Windows 10/11, macOS.
 
-Two modes:
+Three modes:
 
 - **Dancer** — small floating loop on your desktop with a tray-icon controller.
 - **Lunch** — fullscreen "I'M ON LUNCH" away screen with the dancer in the middle. Triggered from the tray menu or `--lunch "<message>"`.
+- **Screensaver (Windows)** — install `desktop-dancer.scr` and the OS launches the same "I'M ON LUNCH" overlay with Sakura after your idle timeout. Exits on any mouse motion / click / key.
 
 ![demo](dance_loop.webp)
 
@@ -97,6 +98,28 @@ desktop-dancer --lunch "brb" --title "AFK"
 2. Browse to `desktop-dancer.exe` and add the args, e.g.:
    `"C:\path\to\desktop-dancer.exe" --lunch "back at 1pm" --clip sakura`
 3. Double-click the shortcut whenever you step away.
+
+## Use it as your Windows screensaver
+
+Every tagged release ships a `desktop-dancer.scr` next to the `.exe` — same binary, handles the `/s` `/c` `/p:` args Windows passes to screensavers. In `/s` mode it shows the fullscreen "I'M ON LUNCH" overlay with the Sakura clip and exits on any mouse motion, click, or keypress.
+
+### Install (no admin needed)
+
+1. Download `desktop-dancer.scr` from the [latest release](https://github.com/gabubu-dev/desktop-dancer/releases/latest).
+2. Right-click it in Explorer → **Install**. Windows opens the Screen Saver Settings dialog with **desktop-dancer** already selected.
+3. Set the idle minutes and click **OK**.
+
+### Install (system-wide, admin)
+
+Copy `desktop-dancer.scr` to `C:\Windows\System32\`, then:
+
+1. **Start → Settings → Personalization → Lock screen → Screen saver settings**.
+2. Pick **desktop-dancer** from the dropdown, set the wait time, **OK**.
+
+### Notes
+
+- The **Settings** button in the Screen Saver picker shows a brief info dialog. To change the message or clip permanently, run the `.exe` with `--lunch`/`--clip` flags from a shortcut instead of using the screensaver.
+- The Personalization preview rectangle (the tiny picture above the dropdown) stays blank — embedding a Qt window in an arbitrary HWND isn't supported yet. The full-screen experience works fine.
 
 ## Make your own dance loop
 
