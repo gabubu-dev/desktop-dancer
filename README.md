@@ -4,11 +4,16 @@ Floating, transparent, always-on-top dancer for your desktop. Feeds a video clip
 
 Cross-platform: Linux (X11 + Wayland via XWayland), Windows 10/11, macOS.
 
+Two modes:
+
+- **Dancer** — small floating loop on your desktop with a tray-icon controller.
+- **Lunch** — fullscreen "I'M ON LUNCH" away screen with the dancer in the middle. Triggered from the tray menu or `--lunch "<message>"`.
+
 ![demo](dance_loop.webp)
 
 ## Why
 
-Existing desktop pets (Shimeji etc.) are chibi sprites. This project lets you put **real video footage** of any dancer / performer on your desktop, looping silently behind your other windows.
+Existing desktop pets (Shimeji etc.) are chibi sprites. This project lets you put **real video footage** of any dancer / performer on your desktop, looping silently behind your other windows — and turn that same footage into a "be right back" lock-style overlay when you step away.
 
 ## Get it
 
@@ -30,6 +35,18 @@ python desktop_dancer.py
 
 > Some Linux distros need `python3` / `pip3` instead of `python` / `pip`.
 
+## Bundled clips
+
+Pick one with `--clip <name>` (no argument = `kpop`):
+
+| Name     | Source                                      | File                  |
+|----------|---------------------------------------------|-----------------------|
+| `kpop`   | ILLIT "Magnetic" (Studio CHOOM)             | `dance_loop.webp`     |
+| `kpop2`  | Second Studio CHOOM clip                    | `new_loop.webp`       |
+| `sakura` | Cardcaptor Sakura OP1 "Catch You Catch Me"  | `sakura_loop.webp`    |
+
+You can also pass a path: `desktop-dancer my_anim.webp`.
+
 ## Controls
 
 There are two control surfaces — the dancer window itself, and a system tray icon (notification area / menu bar).
@@ -48,12 +65,38 @@ There are two control surfaces — the dancer window itself, and a system tray i
 | Action                  | Effect                              |
 |-------------------------|-------------------------------------|
 | Left-click tray icon    | Re-enable clicks so you can drag    |
+| Right-click → **Go on lunch…** | Fullscreen "I'M ON LUNCH" overlay |
 | Right-click → **Move**  | Same — disables click-through        |
 | Right-click → **Click-through** | Toggle on/off                |
 | Right-click → **Resize** | 25% / 50% / 75% / 100% / 150%       |
 | Right-click → **Quit**   | Exit                                |
 
 The tray icon is the answer to "I turned on click-through and now I can't grab my dancer." Click it and you get the window back.
+
+## Lunch mode
+
+A fullscreen "I'M ON LUNCH" away screen for when you step away from your desk. Big text, a live clock, the dancer looping in the middle, dark background. Press **Esc** to dismiss.
+
+Two ways to launch it:
+
+**From the tray icon (recommended on Windows).** Right-click the dancer tray icon → **Go on lunch…**. You'll get a prompt for the message ("back at 1pm", "lunch — back in 30 min", etc.). Esc returns you to the small floating dancer.
+
+**From the command line.**
+
+```bash
+desktop-dancer --lunch "back at 1pm"
+desktop-dancer --lunch "lunch — back ~1pm" --clip sakura
+desktop-dancer --lunch "brb" --title "AFK"
+```
+
+`--title` swaps the big header (default: `I'M ON LUNCH`).
+
+### Windows: make a desktop shortcut for lunch mode
+
+1. Right-click your desktop → **New → Shortcut**.
+2. Browse to `desktop-dancer.exe` and add the args, e.g.:
+   `"C:\path\to\desktop-dancer.exe" --lunch "back at 1pm" --clip sakura`
+3. Double-click the shortcut whenever you step away.
 
 ## Make your own dance loop
 
@@ -130,8 +173,9 @@ The build also works on Linux (`./dist/desktop-dancer` ELF binary) and macOS (`.
 - `rvm_to_webp.py` — RVM matting pipeline, outputs animated WebP with alpha
 - `desktop_dancer.spec` — PyInstaller build spec
 - `.github/workflows/build-windows.yml` — CI builds and attaches exe on `v*` tags
-- `dance_loop.webp` — 15s demo, ILLIT "Magnetic" (Studio CHOOM) — bundled into the exe
-- `new_loop.webp` — 15s demo, second clip (Studio CHOOM) — try it via `python desktop_dancer.py new_loop.webp`
+- `dance_loop.webp` — 15s demo, ILLIT "Magnetic" (Studio CHOOM) — bundled
+- `new_loop.webp` — 15s demo, second clip (Studio CHOOM) — bundled
+- `sakura_loop.webp` — 15s demo, Cardcaptor Sakura OP1 — bundled
 
 ## Platform notes
 

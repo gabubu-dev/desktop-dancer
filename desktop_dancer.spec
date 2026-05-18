@@ -1,14 +1,20 @@
 # PyInstaller spec for desktop-dancer.
 # Build:  pyinstaller desktop_dancer.spec
 # Output: dist/desktop-dancer.exe (Windows) or dist/desktop-dancer (macOS/Linux)
+import os
 
 block_cipher = None
+
+# Bundle every clip we have. Skip ones that haven't been rendered yet so a
+# fresh checkout still builds before someone runs the matting pipeline.
+_CLIPS = ['dance_loop.webp', 'new_loop.webp', 'sakura_loop.webp']
+clip_datas = [(c, '.') for c in _CLIPS if os.path.exists(c)]
 
 a = Analysis(
     ['desktop_dancer.py'],
     pathex=[],
     binaries=[],
-    datas=[('dance_loop.webp', '.')],
+    datas=clip_datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

@@ -1,9 +1,22 @@
-"""Frameless transparent always-on-top dancer.
+"""Frameless transparent always-on-top dancer + fullscreen 'on lunch' mode.
 
-Usage: desktop_dancer.py [path-to-rgba-animation]
-       (with no arg: loads the bundled dance_loop.webp)
+Two modes:
 
-Supported formats: animated WebP, GIF (anything QMovie can play).
+Normal (default) — a small floating dancer window with a tray icon.
+
+    desktop-dancer                          # bundled kpop clip
+    desktop-dancer --clip kpop2             # second kpop clip
+    desktop-dancer --clip sakura            # Cardcaptor Sakura OP1
+    desktop-dancer /path/to/anim.webp       # any animated webp/gif
+
+Lunch — fullscreen "I'M ON LUNCH" away screen with the dancer in the middle.
+
+    desktop-dancer --lunch "back at 1pm"
+    desktop-dancer --lunch "lunch, back ~1pm" --clip sakura
+    desktop-dancer --lunch "brb" --title "AFK"
+
+The tray icon also has a "Go on lunch..." menu entry that pops a prompt for the
+message, so you don't have to relaunch from the command line.
 
 Window controls (when not click-through):
     Drag           — move
@@ -11,26 +24,53 @@ Window controls (when not click-through):
     Right-click    — close
     Middle-click   — toggle click-through
 
-Tray icon (always available):
-    Move           — temporarily disables click-through so you can drag
-    Click-through  — toggle on/off
-    Resize          — preset percentages
-    Quit
+Lunch overlay:
+    Esc            — dismiss
 """
+import argparse
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QSize, QPoint
-from PyQt6.QtGui import QMovie, QIcon, QPixmap, QPainter, QAction
+from PyQt6.QtCore import Qt, QSize, QPoint, QTimer, QTime
+from PyQt6.QtGui import (
+    QMovie, QIcon, QPixmap, QPainter, QAction, QFont, QImageReader,
+)
 from PyQt6.QtWidgets import (
     QApplication, QLabel, QWidget, QSystemTrayIcon, QMenu,
+    QVBoxLayout, QInputDialog,
 )
 
 
+# Friendly clip name -> bundled filename (resolved via resource_path).
+CLIP_MAP = {
+    "kpop":   "dance_loop.webp",
+    "kpop2":  "new_loop.webp",
+    "sakura": "sakura_loop.webp",
+}
+
+
 def resource_path(rel: str) -> Path:
-    """Resolve a bundled or repo-relative resource path."""
+    """Resolve a bundled (PyInstaller _MEIPASS) or repo-relative resource."""
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     return base / rel
+
+
+def resolve_clip(name: str | None, explicit_path: str | None) -> Path:
+    if explicit_path:
+        return Path(explicit_path).expanduser().resolve()
+    rel = CLIP_MAP.get(name or "kpop")
+    if rel is None:
+        sys.exit(f"Unknown --clip {name!r}; choose from {sorted(CLIP_MAP)}")
+    return resource_path(rel)
+
+
+def load_movie(path: Path) -> QMovie:
+    m = QMovie(str(path))
+    if not m.isValid():
+        formats = [bytes(f).decode() for f in QImageReader.supportedImageFormats()]
+        sys.exit(f"QMovie can't read {path}. Supported: {formats}")
+    m.setCacheMode(QMovie.CacheMode.CacheAll)
+    return m
 
 
 def make_tray_icon() -> QIcon:
@@ -60,16 +100,12 @@ class Dancer(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
 
+        self.clip_path = path  # remembered so the tray can reuse it for lunch mode
+
         self.label = QLabel(self)
         self.label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self.movie = QMovie(str(path))
-        if not self.movie.isValid():
-            from PyQt6.QtGui import QImageReader
-            print(f"QMovie can't read {path}.")
-            print(f"  Supported: {[bytes(f).decode() for f in QImageReader.supportedImageFormats()]}")
-            sys.exit(2)
-        self.movie.setCacheMode(QMovie.CacheMode.CacheAll)
+        self.movie = load_movie(path)
         self.label.setMovie(self.movie)
         self.movie.start()
 
@@ -129,13 +165,110 @@ class Dancer(QWidget):
         self.set_scale(self._scale * (1.1 ** steps))
 
 
+class LunchOverlay(QWidget):
+    """Fullscreen "I'M ON LUNCH" away screen with a dancer animating in the middle.
+
+    Esc dismisses. If ``on_dismiss`` is set, it is called instead of quitting the app —
+    used so the tray-launched overlay returns to the dancer rather than ending the
+    process.
+    """
+
+    def __init__(self, clip_path: Path, title: str, message: str, on_dismiss=None):
+        super().__init__(
+            None,
+            Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint,
+        )
+        self.setStyleSheet("background-color: rgb(8, 10, 16);")
+        self._on_dismiss = on_dismiss
+
+        # Title — huge, bold, tracked-out.
+        self.title_label = QLabel(title.upper())
+        self.title_label.setFont(QFont("Segoe UI", 96, QFont.Weight.Black))
+        self.title_label.setStyleSheet("color: white; letter-spacing: 8px;")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Message.
+        self.msg_label = QLabel(message)
+        self.msg_label.setFont(QFont("Segoe UI", 36))
+        self.msg_label.setStyleSheet("color: #d0d0d8;")
+        self.msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Live clock, just because.
+        self.clock = QLabel("")
+        self.clock.setFont(QFont("Segoe UI", 24))
+        self.clock.setStyleSheet("color: #888;")
+        self.clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._tick_clock()
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._tick_clock)
+        self._clock_timer.start(1000)
+
+        # Dancer loop.
+        self.dancer_label = QLabel()
+        self.movie = load_movie(clip_path)
+        self.dancer_label.setMovie(self.movie)
+        self.dancer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.movie.start()
+
+        # Hint at the bottom.
+        self.hint = QLabel("press Esc to dismiss")
+        self.hint.setFont(QFont("Segoe UI", 14))
+        self.hint.setStyleSheet("color: #555;")
+        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(16)
+        layout.addStretch(1)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.msg_label)
+        layout.addWidget(self.clock)
+        layout.addSpacing(20)
+        layout.addWidget(self.dancer_label, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch(2)
+        layout.addWidget(self.hint)
+
+    def _tick_clock(self):
+        self.clock.setText(QTime.currentTime().toString("h:mm AP"))
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        # Size the dancer at ~40% of the screen height once we know the screen.
+        screen = self.screen().availableGeometry() if self.screen() else None
+        if screen is None:
+            return
+        target_h = int(screen.height() * 0.4)
+        size = self.movie.currentImage().size()
+        if size.isEmpty():
+            self.movie.jumpToNextFrame()
+            size = self.movie.currentImage().size()
+        if size.isEmpty() or size.height() == 0:
+            return
+        scale = target_h / size.height()
+        self.movie.setScaledSize(QSize(int(size.width() * scale), target_h))
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.close()
+            if self._on_dismiss:
+                self._on_dismiss()
+            else:
+                QApplication.quit()
+
+
 class TrayController:
     def __init__(self, app: QApplication, dancer: Dancer):
         self.app = app
         self.dancer = dancer
+        self._overlay: LunchOverlay | None = None
         self.tray = QSystemTrayIcon(make_tray_icon(), parent=app)
         self.tray.setToolTip("desktop-dancer")
         menu = QMenu()
+
+        lunch_action = QAction("Go on lunch…", menu)
+        lunch_action.triggered.connect(self._enter_lunch_mode)
+        menu.addAction(lunch_action)
+        menu.addSeparator()
 
         move_action = QAction("Move (briefly enables clicks)", menu)
         move_action.triggered.connect(self._enter_move_mode)
@@ -172,21 +305,69 @@ class TrayController:
         self.dancer.raise_()
         self.dancer.activateWindow()
 
+    def _enter_lunch_mode(self):
+        if self._overlay is not None:
+            # Already on lunch — don't stack overlays.
+            return
+        text, ok = QInputDialog.getText(
+            None, "Go on lunch",
+            "Message to show on the away screen:",
+            text="back in 30 min",
+        )
+        if not ok:
+            return
+        self.dancer.hide()
+        self._overlay = LunchOverlay(
+            self.dancer.clip_path, "I'M ON LUNCH", text,
+            on_dismiss=self._exit_lunch_mode,
+        )
+        self._overlay.showFullScreen()
+
+    def _exit_lunch_mode(self):
+        self._overlay = None
+        self.dancer.show()
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="desktop-dancer",
+        description="Floating transparent dancer / fullscreen 'on lunch' screen.",
+    )
+    p.add_argument(
+        "path", nargs="?",
+        help="Path to an animated webp/gif. Overrides --clip if given.",
+    )
+    p.add_argument(
+        "--clip", choices=sorted(CLIP_MAP),
+        help="Pick a bundled clip (default: kpop).",
+    )
+    p.add_argument(
+        "--lunch", metavar="MESSAGE",
+        help="Launch in fullscreen 'on lunch' mode showing this message.",
+    )
+    p.add_argument(
+        "--title", default="I'M ON LUNCH",
+        help="Big header text for lunch mode (default: %(default)s).",
+    )
+    return p
+
 
 def main():
-    app = QApplication(sys.argv)
+    args = build_arg_parser().parse_args()
+
+    app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
 
-    if len(sys.argv) >= 2:
-        path = Path(sys.argv[1]).expanduser().resolve()
-    else:
-        path = resource_path("dance_loop.webp")
+    clip = resolve_clip(args.clip, args.path)
+    if not clip.exists():
+        sys.exit(f"Clip not found: {clip}")
 
-    if not path.exists():
-        print(f"File not found: {path}")
-        sys.exit(1)
+    if args.lunch is not None:
+        overlay = LunchOverlay(clip, args.title, args.lunch)
+        overlay.showFullScreen()
+        sys.exit(app.exec())
 
-    dancer = Dancer(path)
+    dancer = Dancer(clip)
     dancer.show()
     TrayController(app, dancer)
     sys.exit(app.exec())
