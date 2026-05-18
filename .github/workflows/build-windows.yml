@@ -28,23 +28,29 @@ jobs:
       - name: Build exe
         run: pyinstaller desktop_dancer.spec
 
-      - name: Smoke-test (just check the exe exists and is non-empty)
+      - name: Smoke-test + copy to .scr
         shell: pwsh
         run: |
           $exe = "dist/desktop-dancer.exe"
           if (-not (Test-Path $exe)) { throw "exe not built" }
           if ((Get-Item $exe).Length -lt 1000000) { throw "exe suspiciously small" }
-          Write-Host "OK $((Get-Item $exe).Length / 1MB) MB"
+          # A Windows screensaver is just a renamed .exe with /s /c /p handling.
+          Copy-Item $exe "dist/desktop-dancer.scr"
+          Write-Host "OK $((Get-Item $exe).Length / 1MB) MB (exe + scr)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: desktop-dancer-windows
-          path: dist/desktop-dancer.exe
+          path: |
+            dist/desktop-dancer.exe
+            dist/desktop-dancer.scr
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/desktop-dancer.exe
+          files: |
+            dist/desktop-dancer.exe
+            dist/desktop-dancer.scr
           generate_release_notes: true
