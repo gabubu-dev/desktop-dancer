@@ -59,7 +59,7 @@ There are two control surfaces — the dancer window itself, and a system tray i
 | Drag            | Move                                |
 | Scroll wheel    | Resize                              |
 | Middle-click    | Toggle click-through                |
-| Right-click     | Close                               |
+| Right-click     | Open the tray menu at the cursor    |
 
 ### Tray icon (always available, even when click-through is on)
 

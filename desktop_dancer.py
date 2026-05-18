@@ -26,7 +26,7 @@ overlay exits on any mouse motion, click, or keypress.
 Window controls (when not click-through):
     Drag           — move
     Scroll         — resize
-    Right-click    — close
+    Right-click    — open the tray menu at the cursor
     Middle-click   — toggle click-through
 
 Lunch overlay:
@@ -149,6 +149,11 @@ class Dancer(QWidget):
 
         self._drag_offset: QPoint | None = None
         self._click_through = False
+        self._context_menu: QMenu | None = None
+
+    def set_context_menu(self, menu: QMenu):
+        """Hand the dancer the tray's menu so right-click can pop it."""
+        self._context_menu = menu
 
     def _apply_scale(self):
         w = max(80, int(self.base_size.width() * self._scale))
@@ -179,7 +184,12 @@ class Dancer(QWidget):
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag_offset = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
         elif e.button() == Qt.MouseButton.RightButton:
-            self.close()
+            # Right-click used to call self.close() — which on Windows visually
+            # "kills" the dancer while the process stays alive in the tray, and
+            # confuses users into thinking the app crashed. Show the tray menu
+            # at the click location instead so every action stays discoverable.
+            if self._context_menu is not None:
+                self._context_menu.popup(e.globalPosition().toPoint())
         elif e.button() == Qt.MouseButton.MiddleButton:
             self.toggle_click_through()
 
@@ -222,16 +232,20 @@ class LunchOverlay(QWidget):
             self.setMouseTracking(True)
             self.setCursor(Qt.CursorShape.BlankCursor)
 
-        # Title — huge, bold, tracked-out.
+        # Title — huge, bold. `background: transparent` is critical on Windows:
+        # without it QLabel inherits the OS palette (light bg) and white-on-white
+        # renders invisible. The same goes for every other text label below.
         self.title_label = QLabel(title.upper())
         self.title_label.setFont(QFont("Segoe UI", 96, QFont.Weight.Black))
-        self.title_label.setStyleSheet("color: white; letter-spacing: 8px;")
+        self.title_label.setStyleSheet(
+            "color: white; background: transparent;"
+        )
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Static message (e.g. "back at 1pm"). Hidden when empty.
         self.msg_label = QLabel(message)
         self.msg_label.setFont(QFont("Segoe UI", 36))
-        self.msg_label.setStyleSheet("color: #d0d0d8;")
+        self.msg_label.setStyleSheet("color: #d0d0d8; background: transparent;")
         self.msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if not message:
             self.msg_label.hide()
@@ -242,7 +256,7 @@ class LunchOverlay(QWidget):
             self._timer_end = QDateTime.currentDateTime().addSecs(timer_seconds)
         self.timer_label = QLabel("")
         self.timer_label.setFont(QFont("Segoe UI", 56, QFont.Weight.Bold))
-        self.timer_label.setStyleSheet("color: #e0a8ff;")  # soft purple
+        self.timer_label.setStyleSheet("color: #e0a8ff; background: transparent;")
         self.timer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if self._timer_end is None:
             self.timer_label.hide()
@@ -252,7 +266,7 @@ class LunchOverlay(QWidget):
         # Live clock, just because.
         self.clock = QLabel("")
         self.clock.setFont(QFont("Segoe UI", 24))
-        self.clock.setStyleSheet("color: #888;")
+        self.clock.setStyleSheet("color: #888; background: transparent;")
         self.clock.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._tick_clock()
         self._clock_timer = QTimer(self)
@@ -271,7 +285,7 @@ class LunchOverlay(QWidget):
         hint_text = "move mouse or press any key to exit" if screensaver else "press Esc to dismiss"
         self.hint = QLabel(hint_text)
         self.hint.setFont(QFont("Segoe UI", 14))
-        self.hint.setStyleSheet("color: #555;")
+        self.hint.setStyleSheet("color: #555; background: transparent;")
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout = QVBoxLayout(self)
@@ -387,6 +401,7 @@ class TrayController:
         menu.addAction(quit_action)
 
         self.tray.setContextMenu(menu)
+        self.dancer.set_context_menu(menu)  # share with the dancer's right-click
         self.tray.activated.connect(self._on_activate)
         self.tray.show()
 
